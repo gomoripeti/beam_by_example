@@ -1,0 +1,14 @@
+body {
+    max-width: 1000px;
+    margin: auto;
+}
+
+/* side-by-side code blocks */
+.container .code_block {
+    float: left;
+    width: 50%;
+}
+
+.container .cleaner {
+    clear: both;
+}

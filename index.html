@@ -1,0 +1,1234 @@
+<!DOCTYPE html><html><head>
+<link href="priv/github.css" media="all" rel="stylesheet" type="text/css" />
+<link href="priv/custom.css" media="all" rel="stylesheet" type="text/css" />
+<link rel="stylesheet" href="priv/highlight/styles/github.css">
+<script src="priv/highlight/highlight.pack.js"></script>
+<script>hljs.initHighlightingOnLoad();</script>
+</head>
+<body>
+
+<h1>A peak into the Erlang compiler and BEAM bytecode</h1>
+
+<h2>Compiler</h2>
+
+
+<p>Intermediate representaions:</p>
+
+<p>Erlang source code --> Abstract Syntax Tree ('P') --> expanded AST ('E') --> Core Erlang ('to_core') --> BEAM byte-code</p>
+
+<ul>
+<li><p>source code:</p></li>
+</ul>
+<pre><code>-module(add).
+
+-export([add/2]).
+
+add(A, B) -&gt;
+    id(A) + id(B).
+
+id(I) -&gt;
+    I.
+</code></pre>
+
+<ul>
+<li><p>AST:</p></li>
+</ul>
+<pre><code>[{attribute,1,file,{"examples/add.erl",1}},
+ {attribute,2,module,add},
+ {attribute,4,export,[{add,2}]},
+ {function,6,add,2,
+           [{clause,6,
+                    [{var,6,'A'},{var,6,'B'}],
+                    [],
+                    [{op,7,'+',
+                         {call,7,{atom,7,id},[{var,...}]},
+                         {call,7,{atom,7,...},[{...}]}}]}]},
+ {function,9,id,1,
+           [{clause,9,[{var,9,'I'}],[],[{var,10,'I'}]}]},
+ {eof,11}]}
+</code></pre>
+
+<ul>
+<li><p>Expanded AST:</p></li>
+</ul>
+<pre><code>{add,[{add,2},{module_info,0},{module_info,1}],
+     [{attribute,1,file,{"add.erl",1}},
+      {function,6,add,2,
+                [{clause,6,
+                         [{var,6,'A'},{var,6,'B'}],
+                         [],
+                         [{op,7,'+',
+                              {call,7,{atom,7,...},[{...}]},
+                              {call,7,{atom,...},[...]}}]}]},
+      {function,9,id,1,
+                [{clause,9,[{var,9,'I'}],[],[{var,10,'I'}]}]},
+      {function,0,module_info,0,
+                [{clause,0,[],[],
+                         [{call,0,
+                                {remote,0,{atom,...},{...}},
+                                [{atom,0,...}]}]}]},
+      {function,0,module_info,1,
+                [{clause,0,
+                         [{var,0,'X'}],
+                         [],
+                         [{call,0,
+                                {remote,0,{...},...},
+                                [{atom,...},{...}]}]}]}]}
+</code></pre>
+
+<ul>
+<li><p>Core Erlang</p></li>
+</ul>
+<pre><code>module 'add' ['add'/2,
+          'module_info'/0,
+          'module_info'/1]
+    attributes []
+'add'/2 =
+    %% Line 6
+    fun (_cor1,_cor0) -&gt;
+    let &lt;_cor3&gt; =
+        %% Line 7
+        apply 'id'/1
+    	(_cor1)
+    in  let &lt;_cor2&gt; =
+    	%% Line 7
+    	apply 'id'/1
+    	    (_cor0)
+        in  %% Line 7
+    	call 'erlang':'+'
+    	    (_cor3, _cor2)
+'id'/1 =
+    %% Line 9
+    fun (_cor0) -&gt;
+    _cor0
+'module_info'/0 =
+    fun () -&gt;
+    call 'erlang':'get_module_info'
+        ('add')
+'module_info'/1 =
+    fun (_cor0) -&gt;
+    call 'erlang':'get_module_info'
+        ('add', _cor0)
+end
+</code></pre>
+
+<ul>
+<li><p>BEAM byte-code (symbolic tuple representation)</p></li>
+</ul>
+<pre><code>{module, add}.  %% version = 0
+{exports, [{add,2},{module_info,0},{module_info,1}]}.
+{attributes, []}.
+{labels, 9}.
+
+{function, add, 2, 2}.
+  {label,1}.
+    {line,[{location,"add.erl",6}]}.
+    {func_info,{atom,add},{atom,add},2}.
+  {label,2}.
+    {allocate,1,2}.
+    {move,{x,1},{y,0}}.
+    {line,[{location,"add.erl",7}]}.
+    {call,1,{f,4}}.
+    {move,{x,0},{x,1}}.
+    {move,{y,0},{x,0}}.
+    {move,{x,1},{y,0}}.
+    {line,[{location,"add.erl",7}]}.
+    {call,1,{f,4}}.
+    {line,[{location,"add.erl",7}]}.
+    {gc_bif,'+',{f,0},1,[{y,0},{x,0}],{x,0}}.
+    {deallocate,1}.
+    return.
+
+{function, id, 1, 4}.
+  {label,3}.
+    {line,[{location,"add.erl",9}]}.
+    {func_info,{atom,add},{atom,id},1}.
+  {label,4}.
+    return.
+
+{function, module_info, 0, 6}.
+  {label,5}.
+    {line,[]}.
+    {func_info,{atom,add},{atom,module_info},0}.
+  {label,6}.
+    {move,{atom,add},{x,0}}.
+    {line,[]}.
+    {call_ext_only,1,{extfunc,erlang,get_module_info,1}}.
+
+{function, module_info, 1, 8}.
+  {label,7}.
+    {line,[]}.
+    {func_info,{atom,add},{atom,module_info},1}.
+  {label,8}.
+    {move,{x,0},{x,1}}.
+    {move,{atom,add},{x,0}}.
+    {line,[]}.
+    {call_ext_only,2,{extfunc,erlang,get_module_info,2}}.
+</code></pre>
+
+<p>Detailed steps:</p>
+
+<pre><code>&gt; compile:file("examples/add.erl", [time]).
+Compiling "examples/add.erl"
+ remove_file                   :       0.00 s       1.0 kB %% remove target beam
+ parse_module                  :       0.00 s       2.2 kB %% preprocessor
+ transform_module              :       0.00 s       2.2 kB
+ lint_module                   :       0.00 s       2.2 kB
+ expand_module                 :       0.00 s       2.9 kB
+ core_module                   :       0.01 s      21.8 kB
+ core_fold_module              :       0.00 s      11.3 kB
+ core_transforms               :       0.00 s      11.3 kB
+ core_dsetel_module            :       0.00 s      11.3 kB
+ kernel_module                 :       0.00 s      12.1 kB
+ v3_life                       :       0.00 s       7.6 kB
+ v3_codegen                    :       0.00 s       5.6 kB
+ beam_a                        :       0.00 s       5.3 kB
+ beam_block                    :       0.00 s       5.9 kB
+ beam_except                   :       0.00 s       5.9 kB
+ beam_bool                     :       0.00 s       5.9 kB
+ beam_type                     :       0.00 s       5.9 kB
+ beam_split                    :       0.00 s       5.7 kB
+ beam_dead                     :       0.00 s       5.9 kB
+ beam_jump                     :       0.00 s       5.9 kB
+ beam_peep                     :       0.00 s       5.9 kB
+ beam_clean                    :       0.00 s       5.9 kB
+ beam_bsm                      :       0.00 s       5.9 kB
+ beam_receive                  :       0.00 s       5.9 kB
+ beam_trim                     :       0.00 s       5.9 kB
+ beam_flatten                  :       0.00 s       5.3 kB
+ beam_z                        :       0.00 s       5.2 kB
+ beam_validator                :       0.00 s       5.2 kB
+ beam_asm                      :       0.00 s       1.0 kB
+ save_binary                   :       0.00 s       1.0 kB
+</code></pre>
+
+<h2>Erlang VM/BEAM Emulator/ERTS</h2>
+
+
+<p>A garbage collecting, reduction counting, non-preemptive, directly threaded, register virtual machine</p>
+
+<p><a href="file:///Users/gomoripeti/proj/meetup_beam/EngineTuningII_Beam.pdf">Erik Stenman@EUC2013 p13-21</a>
+  (<a href="http://www.erlang-factory.com/upload/presentations/817/EngineTuningII_Beam.pdf">on the web</a>)</p>
+
+<h2>BEAM bytecode</h2>
+
+
+<ul>
+<li><p>1..153 opcodes (and counting - 5 more for maps in R17B)</p></li>
+<li><p>opcodes: <a href="https://github.com/erlang/otp/blob/maint/lib/compiler/src/genop.tab">genop.tab</a></p><p><div class="container" ><div class="code_block"><pre><code class="erlang">add(A, B) ->
+    id(A) + id(B).
+
+id(I) ->
+    I.
+
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun add/2
+2: allocate 1 2
+   move x1 y0
+   call 1 ->4:
+   move x0 x1
+   move y0 x0
+   move x1 y0
+   call 1 ->4:
+   gc_bif '+' 1 [y0 x0] x0 ->0:
+   deallocate 1
+   return
+fun id/1
+4: return
+</code></pre></div><div class="cleaner"></div></div></p><p>Let's have a closer look again to the example:</p>
+</li>
+</ul>
+<h2>Control contructs</h2>
+
+
+<h3>if vs case vs guards</h3>
+
+
+<p><p>if the tested operation obviously has a boolean outcome
+<code>i/2</code>, <code>c/2</code>, <code>cw/2</code> and even <code>g/2</code>  are identical
+(all compiled to a single <code>test is_lt</code> expression)</p><div class="container" ><div class="code_block"><pre><code class="erlang">i(I, J) ->
+    if I > J -> I;
+       true -> J
+    end.
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun i/2
+2: test is_lt [x1 x0] ->3:
+   return
+3: move x1 x0
+   return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">c(I, J) ->
+    case I > J of
+        true -> I;
+        false -> J
+    end.
+</code></pre></div><div class="code_block"><pre><code class="beam">fun c/2
+2: test is_lt [x1 x0] ->3:
+   return
+3: move x1 x0
+   return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">cw(I, J) ->
+    case I of
+        _ when I > J -> I;
+        _ -> J
+    end.
+</code></pre></div><div class="code_block"><pre><code class="beam">fun cw/2
+2: test is_lt [x1 x0] ->3:
+   return
+3: move x1 x0
+   return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">g(I, J) when I > J -> I;
+g(_I, J) -> J.
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun g/2
+2: test is_lt [x1 x0] ->3:
+   return
+3: move x1 x0
+   return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">g2(I, _) when I > 2 -> I;
+g2(_, J) -> J.
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun g2/2
+2: test is_lt [{integer,2} x0] ->3:
+   return
+3: move x1 x0
+   return
+</code></pre></div><div class="cleaner"></div></div><p>iff <code>I</code> is not an operation with boolean outcome <code>case</code> will do more:</p>
+<ul>
+<li>check if <code>I</code> is an atom + <code>select_val</code> + possible <code>case_clause</code></li>
+<li>while <code>if</code> just does a <code>test is_eq_exact 'true'</code></li>
+</ul><div class="container" ><div class="code_block"><pre><code class="erlang">emb_c(I) ->
+    a:b(case I of true -> a; false -> b end),
+    ok.
+
+
+
+
+
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun emb_c/1
+ 2: allocate 0 1
+    test is_atom [x0] ->6:
+    select_val x0
+        {atom,false} ->3:
+        {atom,true} ->4:
+        ->6:
+ 3: move {atom,b} x0
+    jump ->5:
+ 4: move {atom,a} x0
+ 5: call_ext 1 {extfunc,a,b,1}
+    move {atom,ok} x0
+    deallocate 0
+    return
+ 6: case_end x0
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">emb_i(I) ->
+    a:b(if I -> a; true -> b end),
+    ok.
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun emb_i/1
+2: allocate 0 1
+   test is_eq_exact [x0 {atom,true}] ->3:
+   move {atom,a} x0
+   jump ->4:
+3: move {atom,b} x0
+4: call_ext 1 {extfunc,a,b,1}
+   move {atom,ok} x0
+   deallocate 0
+   return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">emb_c2(I) ->
+    a:b(case I of true -> a; _ -> b end),
+    ok.
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun emb_c2/1
+2: allocate 0 1
+   test is_eq_exact [x0 {atom,true}] ->3:
+   move {atom,a} x0
+   jump ->4:
+3: move {atom,b} x0
+4: call_ext 1 {extfunc,a,b,1}
+   move {atom,ok} x0
+   deallocate 0
+   return
+</code></pre></div><div class="cleaner"></div></div></p>
+
+<p>Another example from real life: nested cases</p>
+
+<p><div class="container" ><div class="code_block"><pre><code class="erlang">c1(A) ->
+    case A > 5 of
+        true -> big;
+        false ->
+            case A > 0 of
+                true -> small;
+                false -> negative
+            end
+    end.
+</code></pre></div><div class="code_block"><pre><code class="beam">fun c1/1
+2: test is_lt [{integer,5} x0] ->3:
+   move {atom,big} x0
+   return
+3: test is_lt [{integer,0} x0] ->4:
+   move {atom,small} x0
+   return
+4: move {atom,negative} x0
+   return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">i1(A) ->
+    if A > 5 -> big;
+       A > 0 -> small;
+       true -> negative
+    end.
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun i1/1
+2: test is_lt [{integer,5} x0] ->3:
+   move {atom,big} x0
+   return
+3: test is_lt [{integer,0} x0] ->4:
+   move {atom,small} x0
+   return
+4: move {atom,negative} x0
+   return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">bad_case(A) ->
+    case A of
+        a -> ok
+    end.
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun bad_case/1
+2: test is_eq_exact [x0 {atom,a}] ->3:
+   move {atom,ok} x0
+   return
+3: case_end x0
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">bad_match(A) ->
+    a = A,
+    ok.
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun bad_match/1
+2: test is_eq_exact [x0 {atom,a}] ->3:
+   move {atom,ok} x0
+   return
+3: badmatch x0
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">good_case(A) ->
+    case A of
+        a -> ok;
+        b -> A;
+        c -> ok;
+        error -> error
+    end.
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun good_case/1
+ 2: test is_atom [x0] ->5:
+    select_val x0
+        {atom,c} ->3:
+        {atom,a} ->3:
+        {atom,error} ->4:
+        {atom,b} ->4:
+        ->5:
+ 3: move {atom,ok} x0
+    return
+ 4: return
+ 5: case_end x0
+</code></pre></div><div class="cleaner"></div></div></p>
+
+<h3>orelse vs if</h3>
+
+
+<p><p><code>orelse</code> is strickter as it throws <code>badarg</code>
+if the variable is not boolean</p><div class="container" ><div class="code_block"><pre><code class="erlang">orelse_(Bool) ->
+    Bool orelse a:b().
+
+
+
+
+
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun orelse_/1
+ 2: test is_atom [x0] ->5:
+    select_val x0
+        {atom,true} ->3:
+        {atom,false} ->4:
+        ->5:
+ 3: return
+ 4: call_ext_only 0 {extfunc,a,b,0}
+ 5: test_heap 3 1
+    put_tuple 2 x1
+    put {atom,badarg}
+    put x0
+    move x1 x0
+    call_ext 1 {extfunc,erlang,error,1}
+</code></pre></div><div class="cleaner"></div></div><p>if the varibale is anything else than the atom <code>true</code>
+the default clause will be called
+(no <code>badarg</code>)</p><div class="container" ><div class="code_block"><pre><code class="erlang">if_(Bool) ->
+    if Bool ->
+            %% note the optimization:
+            %% as Bool is in x0 and it is true
+            %% we can return x0 without moving anything into it
+            true;
+       true ->
+            a:b()
+    end.
+</code></pre></div><div class="code_block"><pre><code class="beam">fun if_/1
+2: test is_eq_exact [x0 {atom,true}] ->3:
+   return
+3: call_ext_only 0 {extfunc,a,b,0}
+
+
+
+
+
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">if_1b(A, B, Bool) ->
+    if A > B -> ok;
+       Bool ->
+            %% Bool is in x2 so have to move the atom true
+            %% into x0 before returning
+            true;
+       true ->
+            a:b()
+    end.
+</code></pre></div><div class="code_block"><pre><code class="beam">fun if_1b/3
+2: test is_lt [x1 x0] ->3:
+   move {atom,ok} x0
+   return
+3: test is_eq_exact [x2 {atom,true}] ->4:
+   move {atom,true} x0
+   return
+4: call_ext_only 0 {extfunc,a,b,0}
+
+</code></pre></div><div class="cleaner"></div></div><p>if the test is not a variable
+so the outcome is guaranteed to be boolean
+then these two clauses are identical</p><div class="container" ><div class="code_block"><pre><code class="erlang">orelse_2(A, B) ->
+    A > B orelse a:b(),
+    ok.
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun orelse_2/2
+2: allocate 0 2
+   test is_ge [x1 x0] ->3:
+   call_ext 0 {extfunc,a,b,0}
+3: move {atom,ok} x0
+   deallocate 0
+   return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">if_2(A, B) ->
+    if A > B ->
+            true;
+       true ->
+            a:b()
+    end,
+    ok.
+</code></pre></div><div class="code_block"><pre><code class="beam">fun if_2/2
+2: allocate 0 2
+   test is_ge [x1 x0] ->3:
+   call_ext 0 {extfunc,a,b,0}
+3: move {atom,ok} x0
+   deallocate 0
+   return
+</code></pre></div><div class="cleaner"></div></div></p>
+
+<h3>throw, exit, error and stacktrace</h3>
+
+
+<p><div class="container" ><div class="code_block"><pre><code class="erlang">th(A) ->
+    throw(A).
+</code></pre></div><div class="code_block"><pre><code class="beam">fun th/1
+2: call_ext 1 {extfunc,erlang,throw,1}
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">ex(A) ->
+    erlang:exit(A).
+</code></pre></div><div class="code_block"><pre><code class="beam">fun ex/1
+2: call_ext 1 {extfunc,erlang,exit,1}
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">err1(_A) ->
+   erlang:error(my_error). 
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun err1/1
+2: move {atom,my_error} x0
+   call_ext 1 {extfunc,erlang,error,1}
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">err2(A) ->
+   erlang:error(my_error, [A]). 
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun err2/1
+2: test_heap 2 1
+   put_list x0 nil x1
+   move {atom,my_error} x0
+   call_ext 2 {extfunc,erlang,error,2}
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">err3(A) ->
+   erlang:error(my_error, [A, b]). 
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun err3/1
+2: test_heap 2 1
+   put_list x0 {literal,[b]} x1
+   move {atom,my_error} x0
+   call_ext 2 {extfunc,erlang,error,2}
+</code></pre></div><div class="cleaner"></div></div></p>
+
+<h2>Functions and funs</h2>
+
+
+<h3>Funs</h3>
+
+
+<p><p>these are different
+this creates a local function calling external <code>a:b/1</code></p><div class="container" ><div class="code_block"><pre><code class="erlang">fun_remote1() ->
+    fun(E) -> a:b(E) end.
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun fun_remote1/0
+2: make_fun2 ->8: 0 0 0
+   return
+fun '-fun_remote1/0-fun-0-'/1
+8: call_ext_only 1 {extfunc,a,b,1}
+</code></pre></div><div class="cleaner"></div></div><p>this calls external function <code>erlang:make_fun(a,b,1)</code></p><div class="container" ><div class="code_block"><pre><code class="erlang">fun_remote2() ->
+    fun a:b/1.
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun fun_remote2/0
+2: move {atom,b} x1
+   move {integer,1} x2
+   move {atom,a} x0
+   call_ext_only 3 {extfunc,erlang,make_fun,3}
+</code></pre></div><div class="cleaner"></div></div><p>these are the same - both create a local function
+(so actually one separate each) calling local/1</p><div class="container" ><div class="code_block"><pre><code class="erlang">fun_local1() ->
+    fun(E) -> local(E) end.
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun fun_local1/0
+ 2: make_fun2 ->10: 0 0 0
+    return
+fun local/1
+ 4: move {atom,do_nothing} x0
+    return
+fun '-fun_local1/0-fun-0-'/1
+10: call_only 1 ->4:
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">fun_local2() ->
+    fun local/1.
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun fun_local2/0
+ 2: make_fun2 ->10: 0 0 0
+    return
+fun local/1
+ 4: move {atom,do_nothing} x0
+    return
+fun '-fun_local2/0-fun-0-'/1
+10: call_only 1 ->4:
+</code></pre></div><div class="cleaner"></div></div><p>each call creates a separate local function
+(so these create two)</p><div class="container" ><div class="code_block"><pre><code class="erlang">fun_local3() ->
+    F1 = fun local/1,
+    F2 = fun local/1,
+    {F1, F2}.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun fun_local3/0
+ 2: allocate_zero 1 0
+    make_fun2 ->12: 0 0 0
+    move x0 y0
+    make_fun2 ->10: 0 0 0
+    test_heap 3 1
+    put_tuple 2 x1
+    put y0
+    put x0
+    move x1 x0
+    deallocate 1
+    return
+fun local/1
+ 4: move {atom,do_nothing} x0
+    return
+fun '-fun_local3/0-fun-1-'/1
+10: call_only 1 ->4:
+fun '-fun_local3/0-fun-0-'/1
+12: call_only 1 ->4:
+</code></pre></div><div class="cleaner"></div></div><p>EEP-23: Allow variables in fun M:F/A
+implemented in R15A in commit ff432e262e6524...</p><div class="container" ><div class="code_block"><pre><code class="erlang">eep23(M, F, A) ->
+    %% this calls external function erlang:make_fun(M,F,A)
+    fun M:F/A.
+</code></pre></div><div class="code_block"><pre><code class="beam">fun eep23/3
+2: call_ext_only 3 {extfunc,erlang,make_fun,3}
+
+</code></pre></div><div class="cleaner"></div></div></p>
+
+<h3>Funs and variable scopes</h3>
+
+
+<p><div class="container" ><div class="code_block"><pre><code class="erlang">f1(A) ->
+    F = fun(B) ->
+                A + B
+        end,
+    F(1).
+
+use_f2(A, B) ->
+    F = f2(A),
+    F(B).
+
+f2(A) ->
+    fun(B) ->
+            B + A
+    end.
+
+
+
+
+
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun f1/1
+ 2: allocate 0 1
+    make_fun2 ->14: 0 0 1
+    move x0 x1
+    move {integer,1} x0
+    call_fun 1
+    deallocate 0
+    return
+fun use_f2/2
+ 4: allocate 1 2
+    move x1 y0
+    call 1 ->6:
+    move x0 x1
+    move y0 x0
+    call_fun 1
+    deallocate 1
+    return
+fun f2/1
+ 6: make_fun2 ->12: 0 0 1
+    return
+fun '-f2/1-fun-0-'/2
+12: gc_bif '+' 2 [x0 x1] x0 ->0:
+    return
+fun '-f1/1-fun-0-'/2
+14: gc_bif '+' 2 [x1 x0] x0 ->0:
+    return
+</code></pre></div><div class="cleaner"></div></div></p>
+
+<h2>foreach vs list comprehension</h2>
+
+<p>(when the result is not assign to a variable or
+ not returned as a last call in a function clause)</p>
+
+<p>From Efficiency Guide:List Handling
+  "Since R12B list comprehensions are translated to local recursive functions
+   If the result of the list comprehension will obviously not be used, a list will not be constructed."</p>
+
+<p>(the code is mostly the same in <code>lists:foreach</code>
+ but not using <code>lists:foreach</code> will avoid calling an external function)</p>
+
+<ul>
+<li><a href="http://erlang.2086793.n4.nabble.com/Erlang-list-comprehension-optimization-td2101109.html">mailing-list: Erlang list comprehension optimization</a></li>
+<li><a href="http://www.erlang.org/doc/efficiency_guide/listHandling.html#id66806">Efficiency Guide: List Handling</a></li>
+<li><a href="http://www.erlang.org/doc/efficiency_guide/myths.html#id61315">Efficiency Guide: The Eight Myths of Erlang Performance</a></li>
+</ul>
+<p><div class="container" ><div class="code_block"><pre><code class="erlang">lc() ->
+    L = [1,2,3],
+    [a:b(E)||E <- L],
+    ok.
+
+
+
+
+
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun lc/0
+ 2: allocate 0 0
+    move {literal,[1,2,3]} x0
+    call 1 ->8:
+    move {atom,ok} x0
+    deallocate 0
+    return
+fun '-lc/0-lc$^0/1-0-'/1
+ 8: test is_nonempty_list [x0] ->9:
+    allocate 1 1
+    get_list x0 x0 y0
+    call_ext 1 {extfunc,a,b,1}
+    move y0 x0
+    call_last 1 ->8: 1
+ 9: test is_nil [x0] ->7:
+    return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">lc_local(L) ->
+    [local(E)||E <- L],
+    ok.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun lc_local/1
+ 2: allocate 0 1
+    call 1 ->10:
+    move {atom,ok} x0
+    deallocate 0
+    return
+fun local/1
+ 4: move {atom,do_nothing} x0
+    return
+fun '-lc_local/1-lc$^0/1-0-'/1
+10: test is_nonempty_list [x0] ->11:
+    allocate 1 1
+    get_list x0 x0 y0
+    call 1 ->4:
+    move y0 x0
+    call_last 1 ->10: 1
+11: test is_nil [x0] ->9:
+    return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">fe() ->
+    L = [1,2,3],
+    lists:foreach(fun(E) -> a:b(E) end, L),
+    ok.
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun fe/0
+2: allocate 0 0
+   make_fun2 ->8: 0 0 0
+   move {literal,[1,2,3]} x1
+   call_ext 2 {extfunc,lists,foreach,2}
+   move {atom,ok} x0
+   deallocate 0
+   return
+fun '-fe/0-fun-0-'/1
+8: call_ext_only 1 {extfunc,a,b,1}
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">fe_local() ->
+    L = [1,2,3],
+    lists:foreach(fun(E) -> local(E) end, L),
+    ok.
+
+
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun fe_local/0
+ 2: allocate 0 0
+    make_fun2 ->10: 0 0 0
+    move {literal,[1,2,3]} x1
+    call_ext 2 {extfunc,lists,foreach,2}
+    move {atom,ok} x0
+    deallocate 0
+    return
+fun local/1
+ 4: move {atom,do_nothing} x0
+    return
+fun '-fe_local/0-fun-0-'/1
+10: call_only 1 ->4:
+</code></pre></div><div class="cleaner"></div></div></p>
+
+<h3>Recursive vs tail-recursive functions</h3>
+
+
+<p><div class="container" ><div class="code_block"><pre><code class="erlang">map1(F, [H|T]) ->
+    [F(H)|map1(F, T)];
+map1(_, []) ->
+    [].
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun map1/2
+2: test is_nonempty_list [x1] ->3:
+   allocate 2 2
+   get_list x1 x2 y1
+   move x0 x1
+   move x2 x0
+   move x1 y0
+   call_fun 1
+   move x0 x2
+   move y1 x1
+   move y0 x0
+   move x2 y1
+   trim 1 1
+   call 2 ->2:
+   test_heap 2 1
+   put_list y0 x0 x0
+   deallocate 1
+   return
+3: test is_nil [x1] ->1:
+   move nil x0
+   return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">tmap1(F, [H|T], Acc) ->
+    tmap1(F, T, [F(H)|Acc]);
+tmap1(_, [], Acc) ->
+    lists:reverse(Acc).
+
+
+
+
+
+
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun tmap1/3
+2: test is_nonempty_list [x1] ->3:
+   allocate 3 3
+   get_list x1 x3 y2
+   move x0 x1
+   move x3 x0
+   move x2 y0
+   move x1 y1
+   call_fun 1
+   test_heap 2 1
+   put_list x0 y0 x2
+   move y2 x1
+   move y1 x0
+   call_last 3 ->2: 3
+3: test is_nil [x1] ->1:
+   move x2 x0
+   call_ext_only 1 {extfunc,lists,reverse,1}
+</code></pre></div><div class="cleaner"></div></div></p>
+
+<h2>Small compile time optimizations</h2>
+
+
+<p><p>variable <code>R</code> is eliminated</p><div class="container" ><div class="code_block"><pre><code class="erlang">v1(A) ->
+    R = A + 1,
+    R.
+</code></pre></div><div class="code_block"><pre><code class="beam">fun v1/1
+2: gc_bif '+' 1 [x0 {integer,1}] x0 ->0:
+   return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">v2(A) ->
+    A + 1.
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun v2/1
+2: gc_bif '+' 1 [x0 {integer,1}] x0 ->0:
+   return
+</code></pre></div><div class="cleaner"></div></div></p>
+
+<h3>Compile-time constant literals</h3>
+
+
+<p><div class="container" ><div class="code_block"><pre><code class="erlang">c() ->
+    {"asd",1}.
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun c/0
+2: move {literal,{"asd",1}} x0
+   return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">minus_zero() ->
+    binary_to_term(<<131,70,128,0,0,0,0,0,0,0>>).
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun minus_zero/0
+2: move {literal,<<131,70,128,0,0,0,0,0,0,0>>} x0
+   call_ext_only 1 {extfunc,erlang,binary_to_term,1}
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">minus_zero2() ->
+    -1 * 0.0.
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun minus_zero2/0
+2: move {float,0.0} x0
+   return
+</code></pre></div><div class="cleaner"></div></div></p>
+
+<h3>Constant folding</h3>
+
+
+<p>bifs with constant arguments, guard tests known to succeed or fail</p>
+
+<p><div class="container" ><div class="code_block"><pre><code class="erlang">abs_() ->
+    abs(-3).             %% 3.
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun abs_/0
+2: move {integer,3} x0
+   return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">element_() ->
+    element(2, {a,b}).   %% b.
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun element_/0
+2: move {atom,b} x0
+   return
+</code></pre></div><div class="cleaner"></div></div><div class="container" ><div class="code_block"><pre><code class="erlang">atom_to_list_() ->
+    atom_to_list(a).     %% "a".
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun atom_to_list_/0
+2: move {literal,"a"} x0
+   return
+</code></pre></div><div class="cleaner"></div></div></p>
+
+<h2>All bifs</h2>
+
+<p>some functions in the erlang module are called as bifs or gc_bifs
+but most of them are called as external functions</p>
+
+<p><a href="https://github.com/erlang/otp/blob/maint/erts/emulator/beam/bif.tab">bif.tab</a></p>
+
+<h3>Record</h3>
+
+
+<ul>
+<li>not really a beam feature</li>
+<li>records are converted to tuple operations in the expand phase</li>
+</ul>
+<p><div class="container" ><div class="code_block"><pre><code class="erlang">f() ->
+    R1 = id(#r{}),
+    R2 = #r{f1 = 1},
+    R3 = R1#r{f2 = 2},
+    {R2, R3}.
+id(A) -> A.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun f/0
+ 2: allocate 0 0
+    move {literal,{r,0,undefined}} x0
+    call 1 ->5:
+    test is_tuple [x0] ->3:
+    test test_arity [x0 3] ->3:
+    get_tuple_element x0 0 x1
+    test is_eq_exact [x1 {atom,r}] ->3:
+    move x0 x1
+    move {integer,2} x2
+    move {integer,3} x0
+    call_ext 3 {extfunc,erlang,setelement,3}
+    test_heap 3 1
+    put_tuple 2 x1
+    put {literal,{r,1,undefined}}
+    put x0
+    move x1 x0
+    deallocate 0
+    return
+ 3: move {literal,{badrecord,r}} x0
+    call_ext 1 {extfunc,erlang,error,1}
+fun id/1
+ 5: return
+</code></pre></div><div class="cleaner"></div></div></p>
+
+<p><p>get the default value for record field <code>f1</code></p><div class="container" ><div class="code_block"><pre><code class="erlang">defval() ->
+    #r{f1 = V} = #r{},
+    V.
+defval2() ->
+    (#r{})#r.f1.
+defval3() ->
+    %% after we know how it is implemented
+    %% we can use some compile time constant folding
+    element(#r.f1, #r{}).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun defval/0
+ 2: move {literal,{r,0,undefined}} x0
+    test is_tuple [x0] ->3:
+    test test_arity [x0 3] ->3:
+    get_tuple_element x0 0 x1
+    get_tuple_element x0 1 x2
+    test is_eq_exact [x1 {atom,r}] ->3:
+    move x2 x0
+    return
+ 3: if_end
+fun defval2/0
+ 5: move {literal,{r,0,undefined}} x0
+    test is_tuple [x0] ->6:
+    test test_arity [x0 3] ->6:
+    get_tuple_element x0 0 x1
+    get_tuple_element x0 1 x2
+    test is_eq_exact [x1 {atom,r}] ->6:
+    move x2 x0
+    return
+ 6: if_end
+fun defval3/0
+ 8: move {integer,0} x0
+    return
+</code></pre></div><div class="cleaner"></div></div></p>
+
+<h2>Maps</h2>
+
+
+<ul>
+<li>coming in R17B</li>
+<li>native data-type for hash-mapped key-value dictionaries</li>
+<li>5 new opcodes (beam files will be backward incompatible)</li>
+</ul>
+<p><div class="container" ><div class="code_block"><pre><code class="erlang">f() ->
+    M = #{a=>1},
+    #{1:=a,2:=b,3:="c","4":="d"} = id(#{1=>a,2=>b,3=>"c","4"=>"d"}),
+    M.
+%% Use this function to avoid compile-time evaluation of an expression.
+id(I) -> I.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+</code></pre></div><div class="code_block"><pre><code class="beam">fun f/0
+ 2: allocate_zero 1 0
+    put_map_assoc ->0: nil x0 0 {list,[{atom,a},{integer,1}]}
+    put_map_assoc ->0: nil x1 1 {list,[{integer,1},
+       {atom,a},
+       {integer,2},
+       {atom,b},
+       {integer,3},
+       {literal,"c"},
+       {literal,"4"},
+       {literal,"d"}]}
+    move x0 y0
+    move x1 x0
+    call 1 ->5:
+    test is_map [x0] ->3:
+    get_map_element ->3: x0 {literal,1} x1
+    get_map_element ->3: x0 {literal,2} x2
+    get_map_element ->3: x0 {literal,3} x3
+    get_map_element ->3: x0 {literal,"4"} x4
+    test is_eq_exact [x1 {atom,a}] ->3:
+    test is_eq_exact [x2 {atom,b}] ->3:
+    test is_eq_exact [x3 {literal,"c"}] ->3:
+    test is_eq_exact [x4 {literal,"d"}] ->3:
+    move y0 x0
+    deallocate 1
+    return
+ 3: badmatch x0
+fun id/1
+ 5: return
+</code></pre></div><div class="cleaner"></div></div></p>
+
+<h2>Some more topics that could be covered</h2>
+
+
+<ul>
+<li>Pattern matching (this is a huge topic)</li>
+<li>inlining</li>
+</ul></body></html>
