@@ -215,7 +215,9 @@ Compiling "examples/add.erl"
 
 <ul>
 <li><p>1..153 opcodes (and counting - 5 more for maps in R17B)</p></li>
-<li><p>opcodes: <a href="https://github.com/erlang/otp/blob/maint/lib/compiler/src/genop.tab">genop.tab</a></p><p><div class="container" ><div class="code_block"><pre><code class="erlang">add(A, B) ->
+<li><p>opcodes: <a href="https://github.com/erlang/otp/blob/maint/lib/compiler/src/genop.tab">genop.tab</a></p></li>
+<li><p>The examples in the rest of this page will show the Erlang source code on the left side, and a pretty-printed version of the generated BEAM byte-code on the right side.</p>
+<p><div class="container" ><div class="code_block"><pre><code class="erlang">add(A, B) ->
     id(A) + id(B).
 
 id(I) ->
@@ -241,8 +243,7 @@ id(I) ->
    return
 fun id/1
 4: return
-</code></pre></div><div class="cleaner"></div></div></p><p>Let's have a closer look again to the example:</p>
-</li>
+</code></pre></div><div class="cleaner"></div></div></p></li>
 </ul>
 <h2>Control contructs</h2>
 
